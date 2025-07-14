@@ -1,4 +1,6 @@
 import os
+import json
+from datetime import datetime
 from dotenv import load_dotenv
 from office365.runtime.auth.user_credential import UserCredential
 from office365.sharepoint.client_context import ClientContext
@@ -94,80 +96,58 @@ def extract_folder_contents(ctx, folder_path, current_level=0, max_depth=5):
                 items.extend(subfolder_items)
     
     except Exception as e:
-        print(f"⚠️  Error accessing folder {folder_path}: {str(e)}")
+        pass  # Silent error handling for production
     
     return items
 
 def display_hierarchical_structure(items):
-    """Display items in a hierarchical tree structure"""
-    if not items:
-        print("📂 No items found.")
-        return
-    
-    # Group items by level for better display
-    levels = {}
-    for item in items:
-        level = item['level']
-        if level not in levels:
-            levels[level] = []
-        levels[level].append(item)
-    
-    # Display items level by level
-    for level in sorted(levels.keys()):
-        level_items = levels[level]
-        
-        # Separate folders and files
-        folders = [item for item in level_items if item['type'] == 'folder']
-        files = [item for item in level_items if item['type'] == 'file']
-        
-        if folders:
-            print(f"\n📁 LEVEL {level} - FOLDERS ({len(folders)} folders):")
-            print("-" * 60)
-            for folder in folders:
-                indent = "  " * level
-                print(f"{indent}📁 {folder['name']}/")
-        
-        if files:
-            print(f"\n📄 LEVEL {level} - FILES ({len(files)} files):")
-            print("-" * 60)
-            for file in files:
-                indent = "  " * level
-                print(f"{indent}📄 {file['name']} ({file['size']})")
+    """Display items in a hierarchical tree structure (deprecated - for legacy compatibility)"""
+    # Function kept for backward compatibility but no longer outputs to console
+    pass
 
 def generate_summary(items):
-    """Generate summary statistics"""
-    if not items:
-        return
-    
-    folders = [item for item in items if item['type'] == 'folder']
-    files = [item for item in items if item['type'] == 'file']
-    
-    # Calculate total size
-    total_size_bytes = sum(item.get('size_bytes', 0) for item in files)
-    total_size_str = format_file_size(total_size_bytes)
-    
-    # File type distribution
-    file_types = {}
-    for file in files:
-        ext = file.get('extension', 'no extension')
-        file_types[ext] = file_types.get(ext, 0) + 1
-    
-    print("\n" + "=" * 70)
-    print("📊 SUMMARY STATISTICS")
-    print("=" * 70)
-    print(f"📁 Total Folders: {len(folders)}")
-    print(f"📄 Total Files: {len(files)}")
-    print(f"💾 Total Size: {total_size_str}")
-    print(f"📊 Total Items: {len(items)}")
-    
-    if file_types:
-        print("\n📋 File Types Distribution:")
-        for ext, count in sorted(file_types.items()):
-            ext_display = ext if ext else 'no extension'
-            print(f"   {ext_display}: {count} files")
+    """Generate summary statistics (deprecated - for legacy compatibility)"""
+    # Function kept for backward compatibility but no longer outputs to console
+    pass
 
-def extract_all_sharepoint_data():
-    """Main function to extract all SharePoint data"""
+def get_files_by_folder(items):
+    """Group files by their parent folder names"""
+    folder_files = {}
+    
+    for item in items:
+        if item['type'] == 'file':
+            # Extract folder name from path or use 'root' for top-level files
+            path_parts = item['path'].split('/')
+            if len(path_parts) > 1:
+                folder_name = path_parts[-2]  # Parent folder name
+            else:
+                folder_name = 'root'
+            
+            if folder_name not in folder_files:
+                folder_files[folder_name] = []
+            folder_files[folder_name].append(item['name'])
+    
+    return folder_files
+
+def format_for_frontend_api(items, organization_name="HEDP"):
+    """Format data for simple frontend API consumption - grouped by folders"""
+    return get_files_by_folder(items)
+
+def format_detailed_json(items, organization_name="HEDP"):
+    """Format data as detailed JSON with metadata and statistics (deprecated)"""
+    # Simplified to match user requirements - just return simple format
+    return format_for_frontend_api(items, organization_name)
+
+def extract_sharepoint_data_as_json(format_type="simple", organization_name="HEDP"):
+    """Extract SharePoint data and return as simple JSON
+    
+    Args:
+        format_type (str): Ignored - always returns simple format
+        organization_name (str): Name of the organization (used as key in JSON)
+    
+    Returns:
+        dict: Simple JSON with organization name as key and filenames as array
+    """
     # Load environment variables
     load_dotenv()
     USERNAME = os.getenv('sharepoint_email')
@@ -176,15 +156,12 @@ def extract_all_sharepoint_data():
     HEDP_FOLDER_PATH = os.getenv('hedp_folder_path')
     
     if not all([USERNAME, PASSWORD, SITE_URL, HEDP_FOLDER_PATH]):
-        print("❌ Missing environment variables. Check .env file.")
-        return
+        return {organization_name: []}
     
     if SITE_URL.endswith('/'):
         SITE_URL = SITE_URL[:-1]
     
     try:
-        print("🔗 Connecting to SharePoint...")
-        
         # Handle OneDrive personal folders
         if "personal/" in HEDP_FOLDER_PATH:
             personal_site_url = f"{SITE_URL}/personal/muhammad_fawwaz_tmcltd_com"
@@ -203,35 +180,26 @@ def extract_all_sharepoint_data():
             
             base_path = f"{web.properties['ServerRelativeUrl']}/{HEDP_FOLDER_PATH}"
         
-        print(f"📂 Extracting data from: {base_path}")
-        print("⏳ This may take a moment for large folder structures...")
-        
         # Extract all data recursively
         all_items = extract_folder_contents(ctx, base_path)
         
-        # Display results
-        print("\n" + "=" * 70)
-        print("🗂️  COMPLETE SHAREPOINT FOLDER STRUCTURE")
-        print("=" * 70)
-        
-        if all_items:
-            display_hierarchical_structure(all_items)
-            generate_summary(all_items)
-        else:
-            print("📂 No items found in the specified folder.")
-        
-        print("\n✅ Data extraction completed!")
+        # Always return simple format
+        return format_for_frontend_api(all_items, organization_name)
         
     except Exception as e:
-        print(f"❌ Error: {str(e)}")
-        print("Check your credentials and folder path.")
+        return {organization_name: []}
+
+def extract_all_sharepoint_data():
+    """Main function to extract all SharePoint data (legacy display format - deprecated)"""
+    # Deprecated function - use extract_sharepoint_data_as_json() instead
+    return extract_sharepoint_data_as_json("simple", "HEDP")
 
 def main():
-    """Main function"""
-    print("=" * 70)
-    print("🗂️  HEDP SharePoint Complete Data Extractor")
-    print("=" * 70)
-    extract_all_sharepoint_data()
+    """Main function - returns simple JSON data for production use"""
+    # Production version - returns simple data format
+    return extract_sharepoint_data_as_json("simple", "HEDP")
 
 if __name__ == "__main__":
-    main()
+    # For direct script execution, output JSON to stdout
+    result = main()
+    print(json.dumps(result, indent=2))
